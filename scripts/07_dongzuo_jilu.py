@@ -1,4 +1,4 @@
-# /home/zhz/Deepl/subway_surfers_ai/scripts/07_dongzuo_jilu.py (uiautomator2 最终版)
+# scripts/07_dongzuo_jilu.py (v2 - UIA2注入对齐版)
 
 import time
 import sys
@@ -6,91 +6,138 @@ from pathlib import Path
 from pynput import keyboard
 import uiautomator2 as u2
 
-# --- 配置区 ---
-ACTION_MAP = {
-    'w': 'up',
-    's': 'down',
-    'a': 'left',
-    'd': 'right'
-}
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-OUTPUT_LOG_FILE = "gameplay_01_actions.txt"
-OUTPUT_LOG_PATH = PROJECT_ROOT / OUTPUT_LOG_FILE
+# --- [新增] 配置区 ---
+# 【重要】确保此处的设备IP与您 play.py 中的一致
+DEVICE_IP = "192.168.3.17:37169" # 请替换为您手机的IP和端口
+# 【重要】定义输出文件路径
+OUTPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "actions" / "gameplay_01_actions.txt"
 
-def record_and_control_session():
-    """
-    使用 pynput 监听键盘，并使用 uiautomator2 实时控制手机。
-    """
-    print("--- 动作记录与u2实时控制程序 ---")
+# --- [新增] 全局变量 ---
+d = None
+action_file = None
+start_time = None
+screen_width = 0
+screen_height = 0
 
-    # 1. 连接到设备
+# --- [新增] 健壮的手机连接函数 (与play.py保持一致) ---
+def robust_connect(device_ip):
+    """
+    连接到安卓设备，如果失败则提供清晰的指引并退出。
+    """
+    global d, screen_width, screen_height
+    print(f"正在尝试连接手机: {device_ip}...")
     try:
-        print("正在通过 uiautomator2 连接到手机...")
-        # u2.connect() 会自动查找通过ADB连接的设备
-        d = u2.connect('192.168.3.17:34781')
-        print(f"✅ 成功连接到设备: {d.device_info['serial']}")
-        # 获取屏幕尺寸，用于计算滑动坐标
-        width, height = d.window_size()
-        print(f"屏幕尺寸: {width}x{height}")
+        d = u2.connect(device_ip)
+        d.info 
+        screen_width, screen_height = d.window_size()
+        print(f"手机连接成功！屏幕尺寸: {screen_width}x{screen_height}")
+        return True
     except Exception as e:
-        print(f"❌ 连接设备失败: {e}")
-        print("请确保手机已通过ADB连接，并且uiautomator2守护进程已正确安装运行。")
+        print("\n--- 连接失败！---")
+        print(f"错误详情: {e}")
+        print("请确保：")
+        print(f"1. 手机的无线调试已开启，且IP与端口为: {device_ip}")
+        print(f"2. PC与手机在同一WiFi网络下。")
+        print(f"3. 已通过USB线缆执行过一次 'python -m uiautomator2 init'。")
+        print("4. scrcpy投屏窗口已打开并能正常显示。")
+        return False
+
+# --- [新增] 动作执行与记录函数 ---
+def execute_and_record(action_str):
+    """
+    执行一个动作，并在动作完成后记录时间戳。
+    """
+    global d, action_file, start_time, screen_width, screen_height
+    if not d or not action_file:
         return
 
-    # 2. 定义滑动函数
-    def perform_swipe(action):
-        center_x, center_y = width // 2, height // 2
-        swipe_dist = height // 6
+    center_x, center_y = screen_width // 2, screen_height // 2
+    swipe_dist = screen_height // 6
+    
+    print(f"执行动作: {action_str.upper()}")
+    
+    # 执行滑动操作
+    if action_str == 'up':
+        d.swipe(center_x, center_y, center_x, center_y - swipe_dist, 0.1)
+    elif action_str == 'down':
+        d.swipe(center_x, center_y, center_x, center_y + swipe_dist, 0.1)
+    elif action_str == 'left':
+        d.swipe(center_x, center_y, center_x - swipe_dist, center_y, 0.1)
+    elif action_str == 'right':
+        d.swipe(center_x, center_y, center_x + swipe_dist, center_y, 0.1)
+    
+    # [核心] 动作执行后，记录当前时间
+    current_time = time.time() - start_time
+    log_entry = f"{current_time:.4f},{action_str}\n"
+    action_file.write(log_entry)
+    action_file.flush() # 确保立即写入文件
+    print(f"记录: {log_entry.strip()}")
 
-        try:
-            if action == 'up':
-                d.swipe(center_x, center_y, center_x, center_y - swipe_dist, 0.1)
-            elif action == 'down':
-                d.swipe(center_x, center_y, center_x, center_y + swipe_dist, 0.1)
-            elif action == 'left':
-                d.swipe(center_x, center_y, center_x - swipe_dist, center_y, 0.1)
-            elif action == 'right':
-                d.swipe(center_x, center_y, center_x + swipe_dist, center_y, 0.1)
-            print(f"    -> 已通过u2发送指令: '{action}'")
-        except Exception as e:
-            print(f"    -> [错误] u2发送指令 '{action}' 失败: {e}")
 
+# --- [修改] 键盘监听回调函数 ---
+def on_press(key):
+    try:
+        # 将 pynput 的 Key 对象或字符转换为统一的字符串
+        key_char = key.char if hasattr(key, 'char') else key.name
+        
+        action_map = {
+            'w': 'up',
+            's': 'down',
+            'a': 'left',
+            'd': 'right',
+            # 如果您使用方向键，也可以添加映射
+            'up': 'up',
+            'down': 'down',
+            'left': 'left',
+            'right': 'right'
+        }
+        
+        if key_char in action_map:
+            execute_and_record(action_map[key_char])
 
-    # 3. 启动键盘监听和记录
-    print("\n请将鼠标焦点置于Scrcpy投屏窗口。")
-    print(f"所有动作将被记录到: {OUTPUT_LOG_PATH}")
-    print("按下 'Esc' 键停止。")
+    except Exception as e:
+        print(f"处理按键时发生错误: {e}")
 
-    log_file = open(OUTPUT_LOG_PATH, 'w')
-    start_time = time.time()
+def on_release(key):
+    # 按下ESC键停止监听
+    if key == keyboard.Key.esc:
+        print("\n--- 停止记录 ---")
+        return False
 
-    def on_press(key):
-        try:
-            char_key = key.char
-            if char_key in ACTION_MAP:
-                timestamp = time.time() - start_time
-                action = ACTION_MAP[char_key]
+# --- [修改] 主程序逻辑 ---
+def main():
+    global action_file, start_time
+
+    # 1. 连接手机
+    if not robust_connect(DEVICE_IP):
+        sys.exit(1)
+
+    # 2. 准备文件和计时器
+    OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(OUTPUT_FILE, 'w') as f:
+            action_file = f
+            start_time = time.time()
+            
+            print("\n" + "="*40)
+            print("--- 动作记录已开始 ---")
+            print(f"设备: {DEVICE_IP}")
+            print(f"记录文件: {OUTPUT_FILE}")
+            print("请将焦点置于 scrcpy 投屏窗口，并开始游戏。")
+            print("使用 W/A/S/D 或方向键进行操作。")
+            print("按 [ESC] 键结束录制。")
+            print("="*40 + "\n")
+
+            # 3. 启动键盘监听器
+            with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
+                listener.join()
                 
-                # 1. 记录
-                log_entry = f"{timestamp:.4f},{action}\n"
-                log_file.write(log_entry)
-                log_file.flush()
-                print(f"记录: {log_entry.strip()}")
-
-                # 2. 通过 uiautomator2 控制
-                perform_swipe(action)
-
-        except AttributeError:
-            if key == keyboard.Key.esc:
-                print("检测到 Esc 键，停止...")
-                log_file.close()
-                return False # 停止监听
-
-    listener = keyboard.Listener(on_press=on_press)
-    listener.start()
-    listener.join()
-
-    print(f"--- 程序结束，日志已保存到 {OUTPUT_LOG_PATH} ---")
+    except IOError as e:
+        print(f"错误：无法写入文件 {OUTPUT_FILE}。请检查权限。")
+        print(f"详情: {e}")
+    finally:
+        if action_file:
+            action_file.close()
 
 if __name__ == '__main__':
-    record_and_control_session()
+    main()

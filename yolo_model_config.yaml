@@ -1,0 +1,41 @@
+# train_config.yaml
+# 我们自己的YOLO11n训练配置文件，对标《katacr》项目
+
+# 核心任务设置
+model: yolo11n.pt
+data: /home/zhz/Deepl/subway_surfers_ai/data/yolo_v2.yaml
+epochs: 80
+patience: 15  # “早停（Early Stopping）机制”，15轮没有出现任何新的提升了，正常地结束的。
+batch: 8
+imgsz: 640
+project: /home/zhz/Deepl/subway_surfers_ai/runs 
+name: 2_detector
+
+# 优化器与学习率 (对标katacr)
+optimizer: auto
+lr0: 0.01
+lrf: 0.01
+momentum: 0.937
+weight_decay: 0.0005
+warmup_epochs: 3.0
+warmup_momentum: 0.8
+
+# 损失函数权重 (对标katacr)
+box: 7.5
+cls: 0.5
+dfl: 1.5
+
+# 数据增强 (对标katacr，特别是关闭了mosaic)
+hsv_h: 0.015
+hsv_s: 0.7
+hsv_v: 0.4
+degrees: 5.0
+translate: 0.05
+scale: 0.2
+shear: 0.0
+perspective: 0.0
+flipud: 0.0
+fliplr: 0.5
+mosaic: 0.0 # 关闭mosaic
+mixup: 0.0
+copy_paste: 0.0

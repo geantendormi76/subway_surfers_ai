@@ -1,0 +1,21 @@
+# 核心AI与深度学习框架
+torch
+torchvision
+onnxruntime-gpu
+
+# 计算机视觉
+opencv-python
+Pillow
+scipy
+
+# 安卓自动化与交互
+uiautomator2
+pynput
+
+# 数据处理与序列化
+numpy
+pyyaml      # 用于处理 .yaml 配置文件
+tqdm        # 进度条工具
+
+# (可选，用于开发) TensorBoard
+tensorboard

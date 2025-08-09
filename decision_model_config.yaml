@@ -1,0 +1,27 @@
+# /home/zhz/Deepl/subway_surfers_ai/decision_model_config.yaml (v3 - 高度解耦版)
+
+# --- [核心修改] 数据定义被分离出去，这里只保留一个指向数据配置文件的指针 ---
+data: /home/zhz/Deepl/subway_surfers_ai/data/decision_data_config.yaml
+
+# --- 训练超参数 ---
+train_params:
+  device: "cuda"
+  epochs: 20
+  batch_size: 32
+  learning_rate: 0.0001
+  weight_decay: 0.1
+  num_workers: 8
+  sequence_length: 30
+  action_resample_window: 15
+  random_interval: 3
+
+# --- 模型超参数 ---
+model_params:
+  state_dim: 8
+  act_dim: 5
+  n_embd: 128
+  n_head: 4
+  n_layer: 4
+  dropout: 0.1
+  block_size: 90
+  max_timestep: 15000

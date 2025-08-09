@@ -1,4 +1,4 @@
-# C:\Users\zhz\Deepl\subway_surfers_ai\subway_surfers_ai\decision\model.py (v3 - 完整最终版)
+# C:\Users\zhz\Deepl\subway_surfers_ai\subway_surfers_ai\decision\model.py (v4 - 索引安全版)
 
 import torch
 import torch.nn as nn
@@ -81,27 +81,25 @@ class StARformer(nn.Module):
         action_embeddings = self.action_encoder(actions)
         rtg_embeddings = self.rtg_encoder(rtgs)
         
-        # [核心修正] timestep_embeddings 的处理方式
-        # 确保 timesteps 的索引不会超过 Embedding 层的最大值
+        # --- [核心修正] ---
+        # 1. 裁剪timestep索引，防止其超出Embedding层的范围，这是导致CUDA assert的直接原因。
         timesteps = timesteps.clamp(0, self.config.max_timestep - 1)
         timestep_embeddings = self.timestep_encoder(timesteps)
+        # --- [修正结束] ---
         
-        # 构建 (RTG, State, Action) 交错序列
         token_sequence = torch.stack(
             [rtg_embeddings, state_embeddings_global, action_embeddings], dim=2
         ).view(B, 3 * T, self.config.n_embd)
         
-        # [核心修正] 确保位置编码和时间步编码的长度与 token_sequence 严格对齐
+        # --- [鲁棒性修正] ---
+        # 2. 确保后续操作的序列长度与token_sequence的实际长度对齐，避免因广播导致尺寸不匹配。
         current_seq_len = token_sequence.shape[1]
         
-        # 添加位置编码
         token_sequence += self.pos_emb[:, :current_seq_len, :]
         
-        # 重复时间步编码以匹配交错序列
         time_embedding_sequence = timestep_embeddings.repeat_interleave(3, dim=1)
-        
-        # 添加时间步编码
         token_sequence += time_embedding_sequence[:, :current_seq_len, :]
+        # --- [修正结束] ---
 
         x = self.drop(token_sequence)
         x = self.blocks(x)

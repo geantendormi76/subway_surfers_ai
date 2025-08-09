@@ -1,4 +1,4 @@
-# /home/zhz/Deepl/subway_surfers_ai/train_decision_model.py (v2 - 高度解耦版)
+# /home/zhz/Deepl/subway_surfers_ai/train_decision_model.py (v3 - 简化加载版)
 
 import torch
 import torch.nn as nn
@@ -22,26 +22,24 @@ def train(main_config_path):
     with open(main_config_path, 'r') as f:
         main_config = yaml.safe_load(f)
     
-    # --- 2. 加载数据配置文件 ---
-    data_config_path = main_config.get('data')
-    if not data_config_path:
-        raise ValueError("主配置文件中未找到 'data' 键，用于指向数据配置文件。")
-    with open(data_config_path, 'r') as f:
-        data_config = yaml.safe_load(f)
+    # --- 2. [核心修改] 直接从主配置文件获取数据目录路径 ---
+    data_path = main_config.get('data')
+    if not data_path:
+        raise ValueError("主配置文件中未找到 'data' 键，用于指向轨迹数据目录。")
 
     # --- 3. 组合配置并初始化 ---
     train_params = main_config.get('train_params', {})
     model_params = main_config.get('model_params', {})
-    data_path = data_config.get('path')
 
     train_config = TrainConfig(**train_params)
     model_config = ModelConfig(**model_params)
     
     print(f"设备: {train_config.device}")
-    print(f"将从以下路径加载数据: {data_path}")
+    print(f"将从以下目录加载数据: {data_path}")
     
     # --- 4. 初始化模型、数据加载器、优化器 ---
     model = StARformer(model_config).to(train_config.device)
+    # [核心修改] 将 data_path (目录路径) 直接传给 create_dataloader
     dataloader = create_dataloader(data_path, train_config)
     optimizer = torch.optim.AdamW(
         model.parameters(), 

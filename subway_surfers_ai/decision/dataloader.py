@@ -1,80 +1,79 @@
-# /home/zhz/Deepl/subway_surfers_ai/subway_surfers_ai/decision/dataloader.py (v3 - 目录加载版)
+# /home/zhz/Deepl/subway_surfers_ai/subway_surfers_ai/decision/dataloader.py (v3 - 支持多数据集)
 
 import torch
 import pickle
 import lzma
 import numpy as np
 import random
-from torch.utils.data import Dataset, WeightedRandomSampler
-from subway_surfers_ai.perception.state_builder import build_state_tensor
 from pathlib import Path
+from torch.utils.data import Dataset, WeightedRandomSampler, DataLoader
+from tqdm import tqdm
+
+# 确保能导入项目模块
+import sys
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+from subway_surfers_ai.perception.state_builder import build_state_tensor
 
 class TrajectoryDataset(Dataset):
-    def __init__(self, trajectory_dir, config):
+    def __init__(self, data_path, config):
         self.config = config
         self.sequence_length = config.sequence_length
         
-        # [核心修改] 遍历目录加载所有 .pkl.xz 文件
-        trajectory_paths = sorted(list(Path(trajectory_dir).glob("*.pkl.xz")))
-        if not trajectory_paths:
-            raise FileNotFoundError(f"在目录 {trajectory_dir} 中没有找到任何 .pkl.xz 轨迹文件")
-
-        print(f"正在从目录 {trajectory_dir} 加载轨迹数据...")
-        
-        trajectories = []
-        for path in trajectory_paths:
-            print(f"  - 加载: {path.name}")
-            with lzma.open(path, 'rb') as f:
-                trajectories.append(pickle.load(f))
-        
-        # [核心修改] 将多个轨迹列表合并为一个长的总轨迹列表
-        self.trajectory = [step for traj in trajectories for step in traj]
+        # --- [核心修改] 加载并拼接所有轨迹数据 ---
+        self._load_and_merge_trajectories(data_path)
         
         self._initialize()
-        print(f"加载完成！共 {len(trajectories)} 个轨迹, 总计 {len(self.trajectory)} 步, 可生成 {len(self.valid_indices)} 个序列。")
+        print(f"所有轨迹加载完成！共 {len(self.trajectory)} 步, 可生成 {len(self.valid_indices)} 个序列。")
+
+    def _load_and_merge_trajectories(self, data_path):
+        """
+        [对齐katacr] 支持加载单个文件或整个目录下的所有 .pkl.xz 文件。
+        """
+        path = Path(data_path)
+        if not path.exists():
+            raise FileNotFoundError(f"数据路径不存在: {path}")
+
+        if path.is_file():
+            files_to_load = [path]
+        elif path.is_dir():
+            files_to_load = sorted(list(path.glob('*.pkl.xz')))
+        
+        if not files_to_load:
+            raise ValueError(f"在路径 {path} 中没有找到任何 .pkl.xz 轨迹文件。")
+
+        print(f"正在从以下文件加载轨迹数据: {files_to_load}")
+        
+        all_trajectories = []
+        for file_path in tqdm(files_to_load, desc="加载并合并轨迹文件"):
+            with lzma.open(file_path, 'rb') as f:
+                all_trajectories.extend(pickle.load(f))
+        
+        self.trajectory = all_trajectories
 
     def _initialize(self):
-        """
-        [核心对齐] 预计算所有有效索引和采样权重。
-        """
         self.valid_indices = []
         self.sample_weights = []
-        
-        # 找到所有动作帧
         action_frames = {i for i, step in enumerate(self.trajectory) if step['action'] != 0}
         
-        # 动作比例，用于计算重采样权重
-        # [鲁棒性修改] 避免除以零的错误
-        if len(self.trajectory) == 0:
+        # 处理没有动作的罕见情况
+        if len(action_frames) == 0:
             action_ratio = 0.0
-        else:
-            action_ratio = len(action_frames) / len(self.trajectory)
-
-        if action_ratio == 0.0:
             weight_action = 1.0
-        else:
-            weight_action = 1.0 / action_ratio
-            
-        if action_ratio == 1.0:
             weight_noop = 1.0
         else:
+            action_ratio = len(action_frames) / len(self.trajectory)
+            weight_action = 1.0 / action_ratio
             weight_noop = 1.0 / (1.0 - action_ratio)
 
         last_action_frame = -float('inf')
         for i in range(len(self.trajectory) - self.sequence_length):
             self.valid_indices.append(i)
-            
-            # --- [对齐] 动作重采样逻辑 ---
-            # 查找当前序列片段的结束帧 (i + sequence_length - 1)
             end_frame_idx = i + self.sequence_length - 1
             is_action_frame = self.trajectory[end_frame_idx]['action'] != 0
-            
             if is_action_frame:
                 last_action_frame = end_frame_idx
-
-            # 论文中的重采样策略：提高动作帧和其后一定范围内帧的权重
-            # Sj = max(1/(1-ra), 1/(ra*(j-ti+1)))
-            # 这是一个简化但有效的实现
             if end_frame_idx - last_action_frame < self.config.action_resample_window:
                 self.sample_weights.append(weight_action)
             else:
@@ -85,22 +84,16 @@ class TrajectoryDataset(Dataset):
 
     def __getitem__(self, idx):
         start_idx = self.valid_indices[idx]
-        
-        # --- [对齐] 随机间隔采样逻辑 ---
         segment_indices = [start_idx]
         current_idx = start_idx
         for _ in range(self.sequence_length - 1):
-            # 在 [1, random_interval] 之间随机选择一个步长
             step = random.randint(1, self.config.random_interval)
             current_idx += step
-            # 确保索引不越界
             if current_idx >= len(self.trajectory):
                 current_idx = len(self.trajectory) - 1
             segment_indices.append(current_idx)
-            
         segment = [self.trajectory[i] for i in segment_indices]
         
-        # 后续处理与之前版本相同
         states = [build_state_tensor(step['state']) for step in segment]
         actions = [step['action'] for step in segment]
         rtgs = [step['rtg'] for step in segment]
@@ -115,27 +108,20 @@ class TrajectoryDataset(Dataset):
             'timesteps': torch.tensor(timesteps, dtype=torch.long)
         }
 
-def create_dataloader(trajectory_dir, config): # [核心修改] 参数名改为 trajectory_dir
+def create_dataloader(data_path, config):
     """
     创建一个包含 WeightedRandomSampler 的 DataLoader。
     """
-    dataset = TrajectoryDataset(trajectory_dir, config)
-    
-    # [鲁棒性修改] 确保有样本可以采样
-    if len(dataset) == 0:
-        # 返回一个空的 DataLoader
-        return torch.utils.data.DataLoader([])
-
+    dataset = TrajectoryDataset(data_path, config)
     sampler = WeightedRandomSampler(
         weights=dataset.sample_weights,
         num_samples=len(dataset),
         replacement=True
     )
-    dataloader = torch.utils.data.DataLoader(
+    dataloader = DataLoader(
         dataset,
         batch_size=config.batch_size,
         sampler=sampler,
-        num_workers=config.num_workers,
-        pin_memory=True # 推荐开启以加速数据到GPU的传输
+        num_workers=config.num_workers
     )
     return dataloader

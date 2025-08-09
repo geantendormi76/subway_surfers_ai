@@ -31,7 +31,7 @@ except ImportError:
 PROJECT_ROOT = Path(__file__).resolve().parent
 ONNX_MODEL_PATH = PROJECT_ROOT / "models" / "one_best_v2.onnx"
 DECISION_MODEL_PATH = PROJECT_ROOT / "models" / "decision_model.pt"
-DEVICE_IP = "192.168.3.17:44339" 
+DEVICE_IP = "192.168.3.17:37169" 
 
 def robust_connect(device_ip):
     """
@@ -114,23 +114,22 @@ class Agent:
     def get_action(self):
         # --- [核心修正] 采用最标准、最简洁的方式构建输入张量 ---
         
-        # 1. 将历史列表转换为Numpy数组
-        states_np = np.array(self.states)       # Shape: (T, H, W, C)
-        actions_np = np.array(self.actions)     # Shape: (T,)
-        rtgs_np = np.array(self.rtgs)           # Shape: (T,)
-        timesteps_np = np.array(self.timesteps) # Shape: (T,)
+        # 1. 将历史列表转换为 PyTorch 张量
+        states = torch.from_numpy(np.array(self.states)).unsqueeze(0).to(self.device, dtype=torch.float32)
+        actions = torch.tensor(self.actions, dtype=torch.long).unsqueeze(0).to(self.device)
+        rtgs = torch.from_numpy(np.array(self.rtgs)).unsqueeze(0).to(self.device, dtype=torch.float32)
+        timesteps = torch.tensor(self.timesteps, dtype=torch.long).unsqueeze(0).to(self.device)
 
-        # 2. 转换为PyTorch张量并添加Batch维度 (B=1)
-        states = torch.from_numpy(states_np).unsqueeze(0).to(self.device).float()
-        actions = torch.from_numpy(actions_np).unsqueeze(0).to(self.device).long()
-        rtgs = torch.from_numpy(rtgs_np).unsqueeze(0).to(self.device).float()
-        timesteps = torch.from_numpy(timesteps_np).unsqueeze(0).to(self.device).long()
-
-        # 3. 调整状态张量的维度以符合PyTorch CNN的期望 (B, T, H, W, C) -> (B, T, C, H, W)
+        # 2. 调整状态张量的维度以符合PyTorch CNN的期望 (B, T, H, W, C) -> (B, T, C, H, W)
         states = states.permute(0, 1, 4, 2, 3)
 
-        # 4. 填充序列到固定长度
+        # 3. [关键] 为当前待预测的动作进行填充
+        #    因为模型输入需要 (s, a, r) 对齐，而当前动作 a_t 尚未知，所以用0填充
         current_len = states.shape[1]
+        if actions.shape[1] < current_len:
+            actions = F.pad(actions, (0, 1), value=0)
+
+        # 4. 填充整个序列到固定长度
         pad_len = self.sequence_length - current_len
         if pad_len > 0:
             states = F.pad(states, (0, 0, 0, 0, 0, 0, 0, pad_len))
@@ -141,7 +140,7 @@ class Agent:
         # 5. 模型推理
         action_logits = self.decision_model(states, actions, rtgs.unsqueeze(-1), timesteps)
         
-        # 6. 获取当前最后一个时间步的预测
+        # 6. 获取当前最后一个时间步的预测 (即对当前状态 s_t 的动作预测 a_t)
         pred = action_logits[0, current_len - 1, :]
         action = torch.argmax(pred).item()
         return action
@@ -164,40 +163,41 @@ class Agent:
         timestep = 0
         current_rtg = 3600
         
+        # --- [核心修正] 确保所有序列在循环开始前是空的 ---
+        self.states, self.actions, self.rtgs, self.timesteps = [], [], [], []
+        
         while True:
             try:
                 start_time = time.time()
                 
-                # 1. 感知当前状态
+                # 1. 感知当前状态 (s_t)
                 screenshot = self.d.screenshot(format="opencv")
                 yolo_objects = self.get_yolo_objects(screenshot)
                 state_tensor = build_state_tensor(yolo_objects)
                 
-                # 2. 将新状态加入历史
+                # 2. 将新状态和对应的RTG、时间步加入历史
+                #    此时 states, rtgs, timesteps 长度为 k
+                #    而 actions 长度为 k-1 (来自上一轮)
                 self.states.append(state_tensor)
+                self.rtgs.append(current_rtg)
                 self.timesteps.append(timestep)
-                
-                # 3. 如果历史序列为空，则填充初始动作和RTG
-                if not self.actions:
-                    self.actions.append(0)
-                    self.rtgs.append(current_rtg)
 
-                # 4. 决策
+                # 3. 决策：基于已有的历史 (直到s_t)，预测动作 a_t
                 action = self.get_action()
                 
-                # 5. 执行
+                # 4. 执行 a_t
                 if action != 0:
                     self.execute_action(action)
 
-                # 6. 将刚执行的动作和用于决策的RTG更新到历史中，为下一次循环准备
+                # 5. 记录：将刚刚执行的动作 a_t 加入历史
+                #    现在所有序列的长度都为 k，为下一次循环做好了准备
                 self.actions.append(action)
-                self.rtgs.append(current_rtg)
                 
-                # 7. 更新下一个时间步的变量
+                # 6. 更新下一个时间步的变量
                 timestep += 1
                 current_rtg -= 0.01
 
-                # 8. 统一维护所有序列长度
+                # 7. 统一维护所有序列长度，保持在记忆窗口内
                 while len(self.states) > self.sequence_length:
                     self.states.pop(0)
                     self.actions.pop(0)
@@ -214,6 +214,8 @@ class Agent:
             except Exception as e:
                 print(f"\n--- 发生严重错误，AI停止 ---")
                 print(f"错误详情: {e}")
+                import traceback
+                traceback.print_exc()
                 break
 
 if __name__ == '__main__':

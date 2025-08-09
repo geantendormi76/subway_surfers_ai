@@ -80,19 +80,34 @@ class StARformer(nn.Module):
         state_embeddings_global = self.state_patch_encoder(states.view(-1, C, H, W)).view(B, T, -1)
         action_embeddings = self.action_encoder(actions)
         rtg_embeddings = self.rtg_encoder(rtgs)
+        
+        # [核心修正] timestep_embeddings 的处理方式
+        # 确保 timesteps 的索引不会超过 Embedding 层的最大值
+        timesteps = timesteps.clamp(0, self.config.max_timestep - 1)
         timestep_embeddings = self.timestep_encoder(timesteps)
         
+        # 构建 (RTG, State, Action) 交错序列
         token_sequence = torch.stack(
             [rtg_embeddings, state_embeddings_global, action_embeddings], dim=2
         ).view(B, 3 * T, self.config.n_embd)
         
-        token_sequence += self.pos_emb[:, :3*T, :]
-        token_sequence += timestep_embeddings.repeat_interleave(3, dim=1)
+        # [核心修正] 确保位置编码和时间步编码的长度与 token_sequence 严格对齐
+        current_seq_len = token_sequence.shape[1]
+        
+        # 添加位置编码
+        token_sequence += self.pos_emb[:, :current_seq_len, :]
+        
+        # 重复时间步编码以匹配交错序列
+        time_embedding_sequence = timestep_embeddings.repeat_interleave(3, dim=1)
+        
+        # 添加时间步编码
+        token_sequence += time_embedding_sequence[:, :current_seq_len, :]
 
         x = self.drop(token_sequence)
         x = self.blocks(x)
         x = self.ln_f(x)
         
+        # 从交错序列中只取出对应于 State 的部分来预测下一个动作
         state_preds = x[:, 1::3, :]
         action_logits = self.action_head(state_preds)
         

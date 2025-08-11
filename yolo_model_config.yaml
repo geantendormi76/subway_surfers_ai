@@ -3,12 +3,12 @@
 
 # 核心任务设置
 model: yolo11n.pt
-data: /home/zhz/Deepl/subway_surfers_ai/data/yolo_v2.yaml
+data: /mnt/c/subway_surfers_ai/data/yolo_vX.yaml
 epochs: 80
 patience: 15  # “早停（Early Stopping）机制”，15轮没有出现任何新的提升了，正常地结束的。
 batch: 8
 imgsz: 640
-project: /home/zhz/Deepl/subway_surfers_ai/runs 
+project: /mnt/c/subway_surfers_ai/runs 
 name: 2_detector
 
 # 优化器与学习率 (对标katacr)

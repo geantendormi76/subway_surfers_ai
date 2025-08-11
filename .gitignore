@@ -3,6 +3,7 @@
 
 # 忽略所有模型文件
 /models/
+/runs/
 
 # 忽略所有评估输出
 /evaluation_output/

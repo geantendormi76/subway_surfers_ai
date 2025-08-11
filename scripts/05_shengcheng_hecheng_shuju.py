@@ -146,7 +146,7 @@ if __name__ == '__main__':
     # 【重要】确保你的背景帧目录名为 frames
     BACKGROUND_FRAMES_DIR = PROJECT_ROOT / "data" / "frames"
     OUTPUT_DATASET_DIR = PROJECT_ROOT / "data" / "yolo_dataset"
-    NUM_IMAGES_TO_GENERATE = 2000
+    NUM_IMAGES_TO_GENERATE = 5000
 
     (OUTPUT_DATASET_DIR / "images").mkdir(parents=True, exist_ok=True)
     (OUTPUT_DATASET_DIR / "labels").mkdir(parents=True, exist_ok=True)

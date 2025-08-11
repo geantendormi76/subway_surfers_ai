@@ -7,12 +7,12 @@ import cv2
 import time
 import onnxruntime as ort
 import uiautomator2 as u2
-import subprocess
 import sys
 from pathlib import Path
+import json
 
 # --- 导入项目核心模块 ---
-# 这个 try-except 结构可以增强脚本的兼容性
+# ... (这部分保持不变) ...
 try:
     from subway_surfers_ai.decision.model import StARformer
     from subway_surfers_ai.decision.config import ModelConfig, TrainConfig
@@ -28,15 +28,16 @@ except ImportError:
     from subway_surfers_ai.utils import constants
 
 # --- Windows端配置 ---
+# ... (这部分保持不变) ...
 PROJECT_ROOT = Path(__file__).resolve().parent
-ONNX_MODEL_PATH = PROJECT_ROOT / "models" / "one_best_v2.onnx"
-DECISION_MODEL_PATH = PROJECT_ROOT / "models" / "decision_model.pt"
-DEVICE_IP = "192.168.3.17:37169" 
+ONNX_MODEL_PATH = PROJECT_ROOT / "models" / "one_best_v3.onnx"
+WEIGHTS_PATH = PROJECT_ROOT / "models" / "decision_model_weights.pt"
+CONFIG_PATH = PROJECT_ROOT / "models" / "decision_model_config.json"
+TRAIN_CONFIG_PATH = PROJECT_ROOT / "models" / "decision_train_config.json"
+DEVICE_IP = "192.168.3.17:35243" # 请确保这里的IP和端口是最新的
 
+# ... (robust_connect 方法保持不变) ...
 def robust_connect(device_ip):
-    """
-    一个更健壮的连接函数，对齐业界实践。
-    """
     print(f"正在尝试连接手机: {device_ip}...")
     try:
         d = u2.connect(device_ip)
@@ -50,35 +51,40 @@ def robust_connect(device_ip):
         print(f"3. 已通过USB线缆执行过一次 'python -m uiautomator2 init'。")
         sys.exit(1)
 
+
 class Agent:
     def __init__(self, device_ip):
+        # ... (init 方法保持 v3 - 权重配置分离版 不变) ...
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         print(f"决策模型将使用设备: {self.device}")
-        
         print("正在加载感知模型...")
         providers = ['CUDAExecutionProvider'] if self.device == 'cuda' else ['CPUExecutionProvider']
         self.ort_session = ort.InferenceSession(str(ONNX_MODEL_PATH), providers=providers)
         self.input_name = self.ort_session.get_inputs()[0].name
         _, _, self.model_height, self.model_width = self.ort_session.get_inputs()[0].shape
         print("感知模型加载成功！")
-
         print("正在加载决策模型...")
-        checkpoint = torch.load(DECISION_MODEL_PATH, map_location=self.device, weights_only=False)
-        self.model_config = checkpoint['model_config']
-        self.train_config = checkpoint['train_config']
+        with open(CONFIG_PATH, 'r') as f:
+            model_params = json.load(f)
+        self.model_config = ModelConfig(**model_params)
+        with open(TRAIN_CONFIG_PATH, 'r') as f:
+            train_params = json.load(f)
+        self.train_config = TrainConfig(**train_params)
+        print("模型配置加载成功！")
         self.decision_model = StARformer(self.model_config).to(self.device)
-        self.decision_model.load_state_dict(checkpoint['model_state_dict'])
+        print(f"正在加载模型权重: {WEIGHTS_PATH}")
+        state_dict = torch.load(WEIGHTS_PATH, map_location=self.device)
+        self.decision_model.load_state_dict(state_dict)
         self.decision_model.eval()
         print("决策模型加载成功！")
-
         self.d = robust_connect(device_ip)
         self.screen_width, self.screen_height = self.d.window_size()
         print(f"手机连接成功！屏幕尺寸: {self.screen_width}x{self.screen_height}")
-
         self.sequence_length = self.train_config.sequence_length
         self.states, self.actions, self.rtgs, self.timesteps = [], [], [], []
 
     def get_yolo_objects(self, frame):
+        # ... (此方法不变) ...
         height, width, _ = frame.shape
         img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img = cv2.resize(img, (self.model_width, self.model_height))
@@ -112,40 +118,22 @@ class Agent:
 
     @torch.no_grad()
     def get_action(self):
-        # --- [核心修正] 采用最标准、最简洁的方式构建输入张量 ---
-        
-        # 1. 将历史列表转换为 PyTorch 张量
+        # [核心修改] get_action不再负责填充，只负责转换和推理
         states = torch.from_numpy(np.array(self.states)).unsqueeze(0).to(self.device, dtype=torch.float32)
         actions = torch.tensor(self.actions, dtype=torch.long).unsqueeze(0).to(self.device)
         rtgs = torch.from_numpy(np.array(self.rtgs)).unsqueeze(0).to(self.device, dtype=torch.float32)
         timesteps = torch.tensor(self.timesteps, dtype=torch.long).unsqueeze(0).to(self.device)
 
-        # 2. 调整状态张量的维度以符合PyTorch CNN的期望 (B, T, H, W, C) -> (B, T, C, H, W)
         states = states.permute(0, 1, 4, 2, 3)
-
-        # 3. [关键] 为当前待预测的动作进行填充
-        #    因为模型输入需要 (s, a, r) 对齐，而当前动作 a_t 尚未知，所以用0填充
-        current_len = states.shape[1]
-        if actions.shape[1] < current_len:
-            actions = F.pad(actions, (0, 1), value=0)
-
-        # 4. 填充整个序列到固定长度
-        pad_len = self.sequence_length - current_len
-        if pad_len > 0:
-            states = F.pad(states, (0, 0, 0, 0, 0, 0, 0, pad_len))
-            actions = F.pad(actions, (0, pad_len), value=0)
-            rtgs = F.pad(rtgs, (0, pad_len), value=0)
-            timesteps = F.pad(timesteps, (0, pad_len), value=0)
-
-        # 5. 模型推理
+        
         action_logits = self.decision_model(states, actions, rtgs.unsqueeze(-1), timesteps)
         
-        # 6. 获取当前最后一个时间步的预测 (即对当前状态 s_t 的动作预测 a_t)
-        pred = action_logits[0, current_len - 1, :]
+        pred = action_logits[0, -1, :] # 直接取最后一个时间步的输出
         action = torch.argmax(pred).item()
         return action
 
     def execute_action(self, action):
+        # ... (此方法不变) ...
         center_x, center_y = self.screen_width // 2, self.screen_height // 2
         swipe_dist = self.screen_height // 6
         action_map = {1: 'up', 2: 'down', 3: 'left', 4: 'right'}
@@ -163,51 +151,79 @@ class Agent:
         timestep = 0
         current_rtg = 3600
         
-        # --- [核心修正] 确保所有序列在循环开始前是空的 ---
         self.states, self.actions, self.rtgs, self.timesteps = [], [], [], []
+        no_player_frames = 0
         
         while True:
             try:
                 start_time = time.time()
                 
-                # 1. 感知当前状态 (s_t)
+                # 1. 感知
                 screenshot = self.d.screenshot(format="opencv")
                 yolo_objects = self.get_yolo_objects(screenshot)
-                state_tensor = build_state_tensor(yolo_objects)
+
+                player_detected = any(obj[0] == constants.CLASS_TO_ID['player'] for obj in yolo_objects)
+                if player_detected:
+                    no_player_frames = 0
+                else:
+                    no_player_frames += 1
+
+                if no_player_frames > 15:
+                    print("\n--- [状态] 连续未检测到玩家，判定游戏结束。AI停止。 ---")
+                    break
+
+                # 2. 准备模型输入序列
+                # [核心修改] 先维护长度，再添加新数据，最后填充
+                current_state = build_state_tensor(yolo_objects)
                 
-                # 2. 将新状态和对应的RTG、时间步加入历史
-                #    此时 states, rtgs, timesteps 长度为 k
-                #    而 actions 长度为 k-1 (来自上一轮)
-                self.states.append(state_tensor)
+                # 如果是第一帧，需要一个虚拟的前置动作
+                if not self.actions:
+                    self.actions.append(0)
+
+                # 统一添加
+                self.states.append(current_state)
                 self.rtgs.append(current_rtg)
                 self.timesteps.append(timestep)
-
-                # 3. 决策：基于已有的历史 (直到s_t)，预测动作 a_t
-                action = self.get_action()
                 
-                # 4. 执行 a_t
-                if action != 0:
-                    self.execute_action(action)
-
-                # 5. 记录：将刚刚执行的动作 a_t 加入历史
-                #    现在所有序列的长度都为 k，为下一次循环做好了准备
-                self.actions.append(action)
-                
-                # 6. 更新下一个时间步的变量
-                timestep += 1
-                current_rtg -= 0.01
-
-                # 7. 统一维护所有序列长度，保持在记忆窗口内
+                # 统一维护长度
                 while len(self.states) > self.sequence_length:
                     self.states.pop(0)
                     self.actions.pop(0)
                     self.rtgs.pop(0)
                     self.timesteps.pop(0)
+
+                # [核心修改] 在这里进行填充，确保送入模型的长度是正确的
+                temp_states = np.array(self.states)
+                temp_actions = np.array(self.actions)
+                temp_rtgs = np.array(self.rtgs)
+                temp_timesteps = np.array(self.timesteps)
+
+                pad_len = self.sequence_length - len(temp_states)
+                if pad_len > 0:
+                    temp_states = np.pad(temp_states, ((0, pad_len), (0, 0), (0, 0), (0, 0)), 'constant')
+                    temp_actions = np.pad(temp_actions, (0, pad_len), 'constant')
+                    temp_rtgs = np.pad(temp_rtgs, (0, pad_len), 'constant')
+                    temp_timesteps = np.pad(temp_timesteps, (0, pad_len), 'constant')
+
+                # 3. 决策
+                action = self.get_action() # get_action现在只负责推理
                 
+                # 4. 执行
+                if action != 0:
+                    self.execute_action(action)
+
+                # 5. 更新历史 (用真实的、未填充的action)
+                self.actions.append(action)
+                
+                # 6. 更新时间步
+                timestep += 1
+                current_rtg -= 0.01
+
                 elapsed = time.time() - start_time
-                print(f"循环耗时: {elapsed:.3f}s, 序列长度 (S/A/R/T): {len(self.states)}/{len(self.actions)}/{len(self.rtgs)}/{len(self.timesteps)}")
+                print(f"循环耗时: {elapsed:.3f}s, 真实序列长度 (S/A/R/T): {len(self.states)}/{len(self.actions)}/{len(self.rtgs)}/{len(self.timesteps)}")
                 time.sleep(max(0, 0.1 - elapsed))
 
+            # ... (except 块保持不变) ...
             except KeyboardInterrupt:
                 print("\n--- AI已停止 ---")
                 break

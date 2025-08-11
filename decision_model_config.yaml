@@ -1,27 +1,25 @@
-# /home/zhz/Deepl/subway_surfers_ai/decision_model_config.yaml (v4 - 简化路径版)
+# data字段现在不再直接使用，因为训练脚本会硬编码指向train_trajectories
+# 但保留它以备将来之用
+data: /mnt/c/subway_surfers_ai/data/trajectories_cleaned
 
-# --- [核心修改] 直接指向包含所有 .pkl.xz 轨迹文件的目录 ---
-data: /home/zhz/Deepl/subway_surfers_ai/data/trajectories
-
-# --- 训练超参数 ---
 train_params:
   device: "cuda"
   epochs: 20
   batch_size: 32
-  learning_rate: 0.0001
+  learning_rate: 0.0006 # 提高初始学习率
   weight_decay: 0.1
   num_workers: 8
   sequence_length: 30
   action_resample_window: 15
   random_interval: 3
+  label_smoothing: 0.1 # 新增标签平滑
 
-# --- 模型超参数 ---
 model_params:
   state_dim: 8
   act_dim: 5
   n_embd: 128
   n_head: 4
-  n_layer: 4
+  n_layer: 3 # 减少层数以防过拟合
   dropout: 0.1
   block_size: 90
-  max_timestep: 40000  # [核心修改] 将值从 15000 扩大到 40000
+  max_timestep: 40000

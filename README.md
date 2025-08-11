@@ -1,93 +1,133 @@
-### **《Subway Surfers AI》项目架构与核心策略深度解析**
+# 《Subway Surfers AI》—— 探索纯视觉自主智能的边界
 
-*一份凝练了项目核心思想、技术路径与数据流转的综合性技术概要。*
+[![Python Version](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-orange.svg)](https://pytorch.org/)
+[![License](https://img.shields.io/badge/License-Apache%202.0-green.svg)](LICENSE)
+[![Status](https://img.shields.io/badge/Status-Active-brightgreen.svg)]()
 
----
+**《Subway Surfers AI》是一个基于纯视觉输入的端到端非嵌入式游戏AI项目。它不读取任何游戏内存，仅通过分析屏幕画面，像人类玩家一样做出决策，并控制游戏角色。**
 
-#### **一、 工程思想 (Guiding Philosophy)**
-
-本项目的核心工程思想，是严格对标业界先进的非嵌入式游戏AI解决方案（如 `wty-yy-katacr`），遵循**“数据驱动、迭代验证、权重与配置分离”**三大原则。项目将复杂的端到端AI任务，清晰地解耦为**感知 (Perception)** 和**决策 (Decision)** 两大独立但相互协作的模块，并通过一系列自动化的数据流水线脚本，将它们高效地连接起来。
-
----
-
-#### **二、 YOLO感知模型训练哲学与工作流**
-
-**核心哲学：** 以最小的人工标注成本为“引信”，通过“**混合创世 (Hybrid Genesis)**”策略引爆数据的“**组合爆炸 (Combinatorial Explosion)**”，从而训练出能在多样化场景下稳定泛化的感知模型。
-
-**工作流：数据飞轮 (The Data Flywheel for Perception)**
-
-1.  **冷启动 (Cold Start): 手动标注**
-    *   **输入**: 9个专家视频 (`gameplay_XX_actions.mp4`) + 2个场景视频 (`clean_run_01.mp4`, `test_02.mp4`)。
-    *   **动作**:
-        *   **`run_slicing.ps1` → `scripts/01_video_qiege.py`**: 将所有视频批量切割成数万张静态图片帧，存入 `data/frames`。
-        *   **人工操作 (LabelImg)**: 从海量帧中，精准挑选约300张具有代表性的“困难样本”（如开局、多障碍物场景），进行精确的人工标注。
-    *   **产出**: `data/images` 目录下包含高质量的种子图片及其 `.xml` 标注。
-
-2.  **数据格式化与素材库构建**
-    *   **动作**:
-        *   **`scripts/02_biaozhu_zhuanhuan.py`**: 将 `.xml` 标注批量转换为YOLO格式的 `.txt` 标签。
-        *   **`scripts/03_zhineng_koutu.py`**: 利用人工标注信息，调用SAM模型，将每一个被标注的物体精确抠图，生成带透明背景的 `.png` 切片。
-    *   **产出**: `data/slices` 目录下，一个按类别分门别类、包含了所有游戏元素的“**高清数字资产库**”。
-
-3.  **数据放大 (Data Amplification via Procedural Generation)**
-    *   **动作**:
-        *   **`scripts/04_qiepian_guiyihua.py`**: 对“数字资产库”中的所有切片进行尺寸归一化，创建一个“**标准件库**”。
-        *   **`scripts/05_shengcheng_hecheng_shuju.py`**: **“混合创世”的核心引擎**。程序化地将“标准件”随机组合并粘贴到真实背景帧上，创造出专家视频中可能从未出现过的全新游戏画面，并自动生成YOLO标签。
-    *   **产出**: `data/yolo_dataset` 目录下，数千张高质量的**合成图像**及其标签。
-
-4.  **模型迭代训练**
-    *   **动作**:
-        *   **`scripts/06_chuangjian_shuju_suoyin.py`**: 将**人工标注的真实数据**与**海量合成数据**进行合并与划分，生成最终的 `train.txt` 和 `val.txt` 索引文件。
-        *   **`train_yolo_model.py`**: 在WSL2环境中，根据 `yolo_model_config.yaml` 配置，加载混合数据集，训练YOLOv8模型。
-        *   **模型导出**: 将最佳权重 (`best.pt`) 导出为 `one_best_vX.onnx` 格式，作为下一代感知模块部署。
-    *   **产出**: 一个更高性能、更高泛化能力的感知模型，如 `one_best_v3.onnx`。
+本项目不仅是一个游戏辅助工具，更是一个严肃的工程实践平台。我们旨在系统性地学习、复现并探索为代表的业界前沿AI解决方案，并致力于将这些技术应用于更广泛的领域，如**提升游戏可及性（为操作不便的玩家提供辅助）、工业自动化检测、以及更通用的汽车纯视觉智能驾驶研究**。
 
 ---
 
-#### **三、 决策模型训练哲学与信息流**
+## 核心理念与愿景
 
-**核心哲学：** 将决策问题重塑为**序列建模问题**。通过**奖励塑形 (Reward Shaping)** 为专家的稀疏行为标注上稠密的因果信号，再利用**优先经验回放 (Prioritized Experience Replay)** 让模型聚焦于关键决策的学习，最终训练出一个能在给定“历史”和“目标”的条件下，模仿专家行为的Transformer模型。
+> 我相信，游戏的乐趣在于策略与思考，而非操作的快慢。对于像我朋友一样手残脑残、手脑极度不协调的玩家，AI不应是破坏公平的“外挂”，而应是弥合生理差距、让我们能平等享受游戏核心乐趣的“智能义肢”。—— 项目发起人
 
-**信息流：从像素到决策 (The Information Flow for Decision Making)**
+本项目的核心愿景是探索AI作为**辅助技术（Assistive Technology）**的潜力，让每个人都能跨越生理的障碍，公平地参与到数字世界的互动与创造中。
 
-1.  **起点: 原始感知**
-    *   `screenshot` (原始像素) **→** YOLO (`one_best_vX.onnx`) **→** `yolo_objects` (Python列表, `[class_id, x, y, w, h]`)。
+我们的工程哲学遵循三大基石原则：
+1.  **数据驱动 (Data-Driven):** 坚信高质量、大规模、多样化的数据是AI能力的唯一源泉。
+2.  **迭代验证 (Iterative Validation):** 采用“假设-实施-诊断-验证”的科学闭环，小步快跑，持续演进。
+3.  **配置与代码分离 (Configuration & Code Decoupling):** 保证实验的可复现性与工程的健壮性。
 
-2.  **状态构建 (Structured State Representation): `state_builder.py`**
-    *   **输入**: `yolo_objects` 列表。
-    *   **核心操作**: 为**每一帧**独立创建一个`32x18x8`的零张量，并将`yolo_objects`中的每个物体信息（类别ID、精确的子像素偏移、宽高、以及`is_player/is_obstacle/is_collectible`的One-Hot编码）填入其对应的空间格子中。
-    *   **产出**: `state_tensor` (`32x18x8` Numpy数组)，一个结构化的、稀疏的**特征地图**，是该帧游戏世界的“数字快照”。
+## 技术架构总览
 
-3.  **轨迹生成 (Offline Trajectory Generation): `08_shengcheng_guiji_shuju.py`**
-    *   **输入**: 所有帧的`state_tensor`序列，以及对齐好的`actions.txt`。
-    *   **核心操作**:
-        *   **终局检测**: 通过“连续N帧无玩家”的启发式规则找到游戏结束帧，**截断**后续的“垃圾时间”数据。
-        *   **奖励塑形**: 遍历截断后的每一帧，打包`(State, Action)`，并根据预设规则（吃金币、靠近障碍物）计算**稠密的即时奖励 (Reward)**。
-        *   **RTG计算**: 在回合内部，**从后向前**反向累加每一帧的`reward`，计算出该帧的**未来期望总回报 (Return-to-Go)**。
-    *   **产出**: `.pkl.xz` 文件，一个包含成千上万个 `(S, A, R, T, RTG)` 时间步字典的列表，即“**离线经验池**”。
+项目将复杂的端到端AI任务，清晰地解耦为两大独立但相互协作的模块：
 
-4.  **数据加载与训练 (Training Pipeline) - 深度解析**
+1.  **感知模块 (Perception):** AI的“**眼睛**”。基于**YOLO**，负责将原始的屏幕像素转化为结构化的游戏状态信息。
+2.  **决策模块 (Decision):** AI的“**大脑**”。基于**StARformer (Transformer)** 架构，根据当前状态及历史信息，推理出最佳动作。
 
-    **第一幕：课程准备 (The Curriculum Designer) - `dataloader.py`**
 
-    1.  **合并所有棋谱 (`__init__`)**: 将所有9份独立的轨迹文件（棋谱）加载并拼接成一个巨大的、包含所有专家经验的“**终极棋谱**”（`self.trajectory`）。
+---
 
-    2.  **划定重点章节 (PTR - `_initialize`)**: 运用**优先经验回放**思想，为“终极棋谱”的每一页进行“划重点”。包含关键动作 (`action != 0`) 的页面及其后续`15`帧（`action_resample_window`）都会被赋予更高的采样权重。
+## 核心工作流详解
 
-    3.  **制作“学习卡片” (`__getitem__`)**: 根据划定的重点，**有偏向性地**、**跳跃式地**（`random_interval`）抽取30个时间步，组成一份包含长程上下文的“学习卡片 (segment)”，并将其转换为PyTorch张量。
+### 1. 感知引擎的锻造：YOLO数据飞轮
 
-    **第二幕：课堂教学 (The Classroom) - `train_decision_model.py` & `model.py`**
+我们采用“**混合创世 (Hybrid Genesis)**”策略，以最小的人工成本，通过程序化生成海量数据，训练出强大的YOLO感知模型。
 
-    1.  **分发学习材料**: 训练主循环一次性取出`32`份（`batch_size`）“学习卡片”，组成一个批次（`batch`），并发送至GPU。
+1.  **冷启动 (Cold Start):** 仅需手动标注约300张“困难样本”。
+2.  **数字资产库构建:** 利用SAM模型，将标注物体精确抠图，创建包含所有游戏元素的“高清数字资产库”。
+3.  **数据放大 (Data Amplification):** 程序化地将“标准件”随机组合粘贴到真实背景上，创造出数千张高质量的合成训练图像。
+4.  **模型迭代:** 将真实数据与合成数据合并，训练出泛化能力极强的感知模型。
 
-    2.  **学生自主学习 (The `forward` pass)**: `StARformer`模型接收到批次数据后，开始一个分工明确的“阅读理解”过程：
-        *   **视觉皮层 (CNN Encoder)**: `state_patch_encoder` 将序列中每个`state_tensor`的空间信息，浓缩为高级视觉特征向量。
-        *   **语言中枢 (Embedding Layers)**: 将离散的`action`, `rtg`, `timestep`等概念，转换为模型可以理解的特征向量。
-        *   **记忆与推理 (Transformer Blocks)**: 将所有特征向量交错排列成一个长度为90的**token序列**。Transformer通过**自注意力机制**对整个序列进行全局复盘，捕捉信息点之间复杂的**时序依赖关系**。
-        *   **决策输出 (Action Head)**: 基于对整个时序上下文的深度理解，最终预测出下一个最应该执行的动作。
+### 2. 决策核心的基石：工业级数据流水线
 
-    3.  **教练批改与学生反思 (Loss Calculation & Backpropagation)**:
-        *   **`loss_fn`**: 将模型的预测与专家的真实动作进行比较，计算出“差距 (`loss`)”。
-        *   **`loss.backward()` & `optimizer.step()`**: 根据差距进行“反思”，调整模型内部的权重，使其在下一次遇到类似情况时，能做出更精准的预测。
+这是本项目的核心创新与关键难点。我们构建了一套自动化、时序精准的数据处理流水线，从根本上解决了模仿学习中的**因果错位 (Causal Misalignment)** 问题。
 
-    这个“**备课 → 教学 → 批改 → 反思**”的循环，在多个`Epoch`中不断重复，最终将一个未经训练的模型，塑造为一个能够模仿专家决策的AI智能体。
+1.  **数据源革命:** 放弃个人录制，拥抱互联网上的海量高水平玩家视频。
+2.  **时间基准统一:** 使用`ffmpeg`将所有视频强制转换为**恒定帧率 (CFR)**，为精准时序分析提供物理保障。
+3.  **模型辅助标注:**
+    *   训练一个初步的**动作识别种子模型** (`action_recognizer_best.pt`)。
+    *   使用种子模型为海量视频自动生成“**草稿动作日志**”。
+4.  **精准时序对齐:**
+    *   提取玩家运动的“**视觉指纹**”（如Y坐标序列）。
+    *   使用**动态时间规整 (DTW)** 算法，将视觉指纹与草稿动作日志进行非线性对齐，实现帧级别的精准同步。
+5.  **最终轨迹生成:** 合并状态与精准动作，通过**奖励塑形 (Reward Shaping)** 计算稠密的即时奖励`R`和未来期望总回报`RTG`，生成最终用于训练的 **`(S, A, R, T, RTG)`** 轨迹。
+
+### 3. 决策大脑的训练：从模仿到优化
+
+我们采用“**模仿学习预训练 + 强化学习微调**”的两阶段范式。
+
+#### **阶段一：模仿学习预训练**
+
+*   **模型:** `StARformer`，一个基于Transformer的强大序列模型。
+*   **训练:** 在高质量轨迹数据上，训练模型学习一种**条件化策略** `P(Action | State, RTG)`。
+*   **过拟合对抗体系:**
+    *   **科学验证与早停:** 监控验证集损失，在模型泛化能力达到顶峰时自动停止训练。
+    *   **损失函数重构:** 采用类别加权和标签平滑，迫使模型学习关键动作。
+    *   **高级正则化:** 通过学习率调度和降低模型容量，提升模型的抽象和泛化能力。
+
+#### **阶段二：RLVR微调 (未来工作)**
+
+*   **目标:** 突破模仿学习的数据上限，让模型学会“创造”最优策略。
+*   **核心思想 (源自《RLVR-World》):** 将训练目标从“模仿得像”转变为“做得好”，通过最大化一个与游戏目标（如生存时长、得分）相关的**可验证奖励 (Verifiable Reward)** 来优化模型。
+
+## 如何开始
+
+### 1. 环境配置
+
+本项目在**Windows + WSL2 (Ubuntu)** 环境下开发。核心训练任务在WSL2的CUDA环境中执行。
+
+1.  克隆本仓库：
+    ```bash
+    git clone https://github.com/geantendormi76/subway_surfers_ai.git
+    cd subway_surfers_ai
+    ```
+2.  创建并激活Conda环境：
+    ```bash
+    conda create -n subway-ai python=3.10
+    conda activate subway-ai
+    ```
+3.  安装所有依赖：
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+### 2. 运行AI
+
+1.  **连接手机:** 确保您的安卓手机已开启“无线调试”功能，并与电脑处于同一局域网下。
+2.  **配置IP:** 修改`play.py`文件中的`DEVICE_IP`为您手机的IP地址和端口。
+3.  **启动游戏:** 在手机上打开《地铁跑酷》并开始一局游戏。
+4.  **运行AI:**
+    ```bash
+    python play.py
+    ```
+
+### 3. 训练自己的模型
+
+1.  **准备数据:** 按照“核心工作流”中的描述，准备视频数据并运行数据处理流水线。
+2.  **训练感知模型:**
+    ```bash
+    python train_yolo_model.py --config yolo_model_config.yaml
+    ```
+3.  **训练决策模型:**
+    ```bash
+    python train_decision_model.py --config decision_model_config.yaml
+    ```
+
+## 贡献
+
+我们欢迎任何形式的贡献！如果您有任何想法、建议或发现了Bug，请随时提交 [Issues](https://github.com/geantendormi76/subway_surfers_ai/issues) 或 [Pull Requests](https://github.com/geantendormi76/subway_surfers_ai/pulls)。
+
+## 致谢
+
+本项目的架构和核心思想深受以下优秀开源项目和研究的启发，在此表示诚挚的感谢：
+*   [wty-yy/katacr](https://github.com/wty-yy/katacr): 非嵌入式游戏AI的黄金标准实现。
+*   [RLVR-World: Training World Models with Reinforcement Learning](https://arxiv.org/abs/2505.13934): 提供了强化学习微调的先进思想。
+
+## License
+
+本项目采用 [Apache-2.0 license](LICENSE)。

@@ -1,4 +1,4 @@
-# verify_model_logic.py (v4 - 轨迹回放诊断版)
+# verify_model_logic.py (V5 - Robust Path Finding)
 import torch
 import torch.nn.functional as F
 import pickle
@@ -23,11 +23,22 @@ except ImportError:
     from subway_surfers_ai.perception.state_builder import build_state_tensor
 
 # --- 配置 ---
-WEIGHTS_PATH = Path("./models/decision_model_weights.pt")
-CONFIG_PATH = Path("./models/decision_model_config.json")
-TRAIN_CONFIG_PATH = Path("./models/decision_train_config.json")
-# 选择一个您希望回放和诊断的轨迹文件
-TRAJECTORY_PATH = Path("./data/val_trajectories/gameplay_02_actions.pkl.xz") # 建议使用验证集中的轨迹
+PROJECT_ROOT = Path(__file__).resolve().parent
+WEIGHTS_PATH = PROJECT_ROOT / "models" / "decision_model_weights.pt"
+CONFIG_PATH = PROJECT_ROOT / "models" / "decision_model_config.json"
+TRAIN_CONFIG_PATH = PROJECT_ROOT / "models" / "decision_train_config.json"
+
+# --- 核心修正：自动查找验证集中的第一个轨迹文件 ---
+VAL_TRAJECTORIES_DIR = PROJECT_ROOT / "data" / "val_trajectories"
+try:
+    # 查找所有 .pkl.xz 文件并排序，取第一个
+    TRAJECTORY_PATH = sorted(list(VAL_TRAJECTORIES_DIR.glob("*.pkl.xz")))[0]
+except IndexError:
+    print(f"错误: 在验证集目录 '{VAL_TRAJECTORIES_DIR}' 中没有找到任何 .pkl.xz 轨迹文件。")
+    print("请确保您已经运行了 '12_generate_final_trajectories.py' 和 '14_split_trajectories.py'。")
+    sys.exit(1)
+# --- 修正结束 ---
+
 
 class OfflineAgent:
     def __init__(self):
@@ -103,6 +114,7 @@ def main():
     for i in tqdm(range(len(trajectory)), desc="轨迹回放中"):
         step_data = trajectory[i]
         
+        # 注意：轨迹文件中保存的是YOLO对象列表，需要先构建成状态张量
         current_state = build_state_tensor(step_data['state'])
         current_rtg = step_data['rtg']
         current_timestep = step_data['timestep']

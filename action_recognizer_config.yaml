@@ -1,0 +1,22 @@
+# action_recognizer_config.yaml
+# 动作识别种子模型的训练配置文件
+
+data_params:
+  # 数据集相关路径将由训练脚本自动构建，此处无需配置
+  num_workers: 4
+
+train_params:
+  device: "cuda"  # "cuda" or "cpu"
+  epochs: 100
+  batch_size: 16
+  learning_rate: 0.001
+  # 早停机制配置
+  early_stopping_patience: 15 # 如果连续15个epoch验证集性能没有提升，则停止
+  early_stopping_metric: "val_accuracy" # 监控指标：'val_loss' 或 'val_accuracy'
+  early_stopping_mode: "max" # 'max' 表示我们希望监控指标越大越好, 'min' 则相反
+
+model_params:
+  num_frames: 8     # 输入模型的帧数
+  num_classes: 4    # 动作类别数 (UP, DOWN, LEFT, RIGHT)
+  image_size: 64    # 图像将被缩放到的正方形尺寸 (64x64)
+  dropout: 0.5

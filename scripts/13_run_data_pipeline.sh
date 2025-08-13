@@ -1,71 +1,33 @@
 #!/bin/bash
-
 # ==============================================================================
-# 脚本名称: 13_run_data_pipeline.sh
-# 脚本功能: 驱动从CFR预处理到最终轨迹生成的完整数据处理流水线。
-#           这是一个批处理脚本，会自动处理指定目录下的所有原始视频。
-# 使用方法: ./scripts/13_run_data_pipeline.sh (在项目根目录 subway_surfers_ai/ 下执行)
+# 脚本功能: 决策模型数据处理与训练的完整自动化流水线。
+#           依次执行：CFR转换 -> 模型预标注 -> DTW对齐 -> 轨迹生成 -> 数据集划分 -> 模型训练
 # ==============================================================================
 
 set -e # 如果任何命令失败，则立即退出脚本
 
-# --- 配置区 ---
-# 获取脚本所在的目录，并向上导航一级以获得项目根目录
-XIANGMU_GEN_MULU=$(dirname "$(dirname "$(readlink -f "$0")")")
-PROCESSED_VIDEO_DIR="$XIANGMU_GEN_MULU/data/internet_videos/processed"
+echo -e "\033[1;36m--- [阶段 1/6] 开始视频标准化 (CFR) ---\033[0m"
+./scripts/07_cfr_yuchuli.sh
+echo -e "\033[1;32m--- [阶段 1/6] 视频标准化完成 ---\033[0m\n"
 
-echo -e "\033[1;34m--- 启动完整的数据处理流水线 ---\033[0m"
-echo "项目根目录: $XIANGMU_GEN_MULU"
+echo -e "\033[1;36m--- [阶段 2/6] 开始模型辅助预标注 ---\033[0m"
+./scripts/10_run_model_annotation.sh
+echo -e "\033[1;32m--- [阶段 2/6] 模型辅助预标注完成 ---\033[0m\n"
 
-# --- 阶段一: CFR 预处理 ---
-echo -e "\n\033[1;36m===== 阶段一: 批量CFR预处理 =====\033[0m"
-# 直接执行CFR脚本
-"$XIANGMU_GEN_MULU/scripts/07_cfr_yuchuli.sh"
-echo -e "\033[1;32mCFR预处理完成。\033[0m"
+echo -e "\033[1;36m--- [阶段 3/6] 开始DTW动态时序对齐 ---\033[0m"
+./scripts/11_run_dtw_alignment.sh
+echo -e "\033[1;32m--- [阶段 3/6] DTW对齐完成 ---\033[0m\n"
 
+echo -e "\033[1;36m--- [阶段 4/6] 开始生成最终轨迹文件 ---\033[0m"
+python scripts/12_generate_final_trajectories.py
+echo -e "\033[1;32m--- [阶段 4/6] 轨迹文件生成完成 ---\033[0m\n"
 
-# --- 阶段二 & 三: 辅助标注与DTW对齐 (循环处理每个视频) ---
-echo -e "\n\033[1;36m===== 阶段二 & 三: 模型辅助标注与DTW对齐 =====\033[0m"
+echo -e "\033[1;36m--- [阶段 5/6] 开始划分训练集和验证集 ---\033[0m"
+python scripts/14_split_trajectories.py
+echo -e "\033[1;32m--- [阶段 5/6] 数据集划分完成 ---\033[0m\n"
 
-if [ ! -d "$PROCESSED_VIDEO_DIR" ]; then
-    echo -e "\033[1;31m错误: 经CFR处理的视频目录不存在: $PROCESSED_VIDEO_DIR\033[0m"
-    exit 1
-fi
+echo -e "\033[1;36m--- [阶段 6/6] 开始训练决策模型 ---\033[0m"
+python train_decision_model.py --config decision_model_config.yaml
+echo -e "\033[1;32m--- [阶段 6/6] 决策模型训练完成 ---\033[0m\n"
 
-for video_path in "$PROCESSED_VIDEO_DIR"/*_cfr.mp4; do
-    if [ -f "$video_path" ]; then
-        video_filename=$(basename "$video_path")
-        echo -e "\n\033[1;35m--- 开始处理视频: $video_filename ---\033[0m"
-
-        # 核心修正：使用 python <file_path> 的方式执行
-        echo -e "\033[1;33m[子步骤 1/2] 正在执行模型辅助标注...\033[0m"
-        python "$XIANGMU_GEN_MULU/scripts/10_tool_model_assisted_annotation.py" --video_path "$video_path"
-        if [ $? -ne 0 ]; then
-            echo -e "\033[1;31m错误: 模型辅助标注失败: $video_filename\033[0m"
-            continue
-        fi
-
-        echo -e "\033[1;33m[子步骤 2/2] 正在执行DTW精准对齐...\033[0m"
-        python "$XIANGMU_GEN_MULU/scripts/11_align_with_dtw.py" --video_path "$video_path"
-        if [ $? -ne 0 ]; then
-            echo -e "\033[1;31m错误: DTW对齐失败: $video_filename\033[0m"
-            continue
-        fi
-        
-        echo -e "\033[1;32m--- 完成视频处理: $video_filename ---\033[0m"
-    fi
-done
-echo -e "\033[1;32m所有视频的标注与对齐已完成。\033[0m"
-
-
-# --- 阶段四: 生成最终轨迹文件 ---
-echo -e "\n\033[1;36m===== 阶段四: 生成最终轨迹文件 =====\033[0m"
-python "$XIANGMU_GEN_MULU/scripts/12_generate_final_trajectories.py"
-if [ $? -ne 0 ]; then
-    echo -e "\033[1;31m错误: 最终轨迹文件生成失败。\033[0m"
-    exit 1
-fi
-echo -e "\033[1;32m所有轨迹文件生成完毕。\033[0m"
-
-
-echo -e "\n\033[1;34m--- 完整数据处理流水线执行成功！ ---\033[0m"
+echo -e "\033[1;35m🎉🎉🎉 完整流水线执行成功！新的决策模型已准备就绪。 🎉🎉🎉\033[0m"

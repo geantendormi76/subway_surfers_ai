@@ -6,7 +6,7 @@ train_params:
   device: "cuda"
   epochs: 20
   batch_size: 32
-  learning_rate: 0.0006 # 提高初始学习率
+  learning_rate: 0.0001 # 提高初始学习率
   weight_decay: 0.1
   num_workers: 8
   sequence_length: 30
